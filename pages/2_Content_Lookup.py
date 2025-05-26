@@ -17,10 +17,28 @@ def show_content_lookup():
         st.error("Please enter a valid integer ID.")
         return
 
-    content = db["Content"].find_one({"content_id": cid}) or {}
-    qa      = db["QA_pairs"].find_one({"content_id": cid}) or {}
-    audits  = list(db["audit_logs"].find({"content_id": cid, "length": "short"}))
+    # 1️⃣ Fetch the content — active or archived
+    content = (
+        db["Content"].find_one({"content_id": cid})
+        or db["completed_content"].find_one({"content_id": cid})
+        or {}
+    )
 
+    # 2️⃣ Fetch QA templates
+    qa = db["QA_pairs"].find_one({"content_id": cid}) or {}
+
+    # 3️⃣ Pull both running & finalized audits
+    audits_active = list(db["audit_logs"].find({
+        "content_id": cid,
+        "length": "short"
+    }))
+    audits_final = list(db["Final_audit_logs"].find({
+        "content_id": cid,
+        "length": "short"
+    }))
+    audits = audits_active + audits_final
+
+    # 4️⃣ Display
     st.subheader("📄 Full Content")
     st.write(content.get("content_text", "—"))
 
@@ -34,8 +52,10 @@ def show_content_lookup():
         df["Reviewer"] = df["intern_id"]
         df["Judgment"] = df["judgment"]
         st.dataframe(df[["Reviewer", "question", "Judgment"]])
-        st.metric("Fleiss Kappa",
-                  compute_fleiss_kappa(df["judgment"].tolist()))
+        st.metric(
+            "Fleiss Kappa",
+            compute_fleiss_kappa(df["judgment"].tolist())
+        )
     else:
         st.info("No audits found.")
 
