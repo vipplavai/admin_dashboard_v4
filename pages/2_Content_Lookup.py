@@ -17,28 +17,26 @@ def show_content_lookup():
         st.error("Please enter a valid integer ID.")
         return
 
-    # 1️⃣ Fetch the content — active or archived
+    # Fetch content (active or archived)
     content = (
         db["Content"].find_one({"content_id": cid})
         or db["completed_content"].find_one({"content_id": cid})
         or {}
     )
 
-    # 2️⃣ Fetch QA templates
+    # Fetch QA templates
     qa = db["QA_pairs"].find_one({"content_id": cid}) or {}
 
-    # 3️⃣ Pull both running & finalized audits
+    # Merge live + final audits
     audits_active = list(db["audit_logs"].find({
-        "content_id": cid,
-        "length": "short"
+        "content_id": cid, "length": "short"
     }))
     audits_final = list(db["Final_audit_logs"].find({
-        "content_id": cid,
-        "length": "short"
+        "content_id": cid, "length": "short"
     }))
     audits = audits_active + audits_final
 
-    # 4️⃣ Display
+    # Display content & QAs
     st.subheader("📄 Full Content")
     st.write(content.get("content_text", "—"))
 
@@ -46,16 +44,28 @@ def show_content_lookup():
     for q in qa.get("questions", {}).get("short", []):
         st.markdown(f"> Q: {q['question']}  \n> A: {q['answer']}")
 
+    # Reviewer judgments, grouped & sorted
     st.subheader("👥 Reviewer Judgments")
     if audits:
+        # build DataFrame and parse timestamps
         df = pd.DataFrame(audits)
-        df["Reviewer"] = df["intern_id"]
-        df["Judgment"] = df["judgment"]
-        st.dataframe(df[["Reviewer", "question", "Judgment"]])
-        st.metric(
-            "Fleiss Kappa",
-            compute_fleiss_kappa(df["judgment"].tolist())
-        )
+        if "timestamp" in df.columns:
+            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+
+        # sort by intern then time
+        df = df.sort_values(["intern_id", "timestamp"])
+
+        # display per‐reviewer
+        for intern, group in df.groupby("intern_id"):
+            with st.expander(f"👤 Reviewer: {intern}", expanded=True):
+                display_df = group[["timestamp", "question", "judgment"]].rename(
+                    columns={"timestamp": "Time", "judgment": "Judgment"}
+                )
+                st.table(display_df)
+
+        # overall agreement
+        all_judgments = df["judgment"].tolist()
+        st.metric("Fleiss Kappa", compute_fleiss_kappa(all_judgments))
     else:
         st.info("No audits found.")
 
